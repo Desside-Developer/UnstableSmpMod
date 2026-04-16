@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "unstablesmpmod",
+  "version": "1.0.0",
+  "name": "UnstableSMP",
+  "description": "Hardcore SMP features: death ban, proximity messages, immortality, wither sound.",
+  "authors": [
+    "duuchniuk"
+  ],
+  "license": "MIT",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "org.unstableSMP.unstablesmpmod.UnstableSMPMod"
+    ],
+    "fabric-datagen": [
+      "org.unstableSMP.unstablesmpmod.client.UnstablesmpmodDataGenerator"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.15.0",
+    "fabric-api": "*",
+    "minecraft": "~1.21.1",
+    "java": ">=21"
+  }
+}
