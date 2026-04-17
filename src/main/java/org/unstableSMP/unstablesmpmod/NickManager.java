@@ -77,25 +77,51 @@ public class NickManager {
 
     // ── Internal ───────────────────────────────────────────────────────────────
 
+    // Cached reflection field for ServerPlayer.tabListDisplayName
+    private static java.lang.reflect.Field tabListDisplayNameField;
+
+    static {
+        try {
+            tabListDisplayNameField = net.minecraft.server.level.ServerPlayer.class
+                    .getDeclaredField("tabListDisplayName");
+            tabListDisplayNameField.setAccessible(true);
+        } catch (NoSuchFieldException e) {
+            // Field name may differ across mappings — will be handled at runtime
+            UnstableSMPMod.LOGGER.warn("Could not find tabListDisplayName field: " + e.getMessage());
+        }
+    }
+
     /**
      * Apply the display-name component to the player entity.
-     * This covers:
      *  - nametag (setCustomName + setCustomNameVisible)
-     *  - tab list (setTabListName)
+     *  - tab list: set private tabListDisplayName field via reflection,
+     *              then broadcast UPDATE_DISPLAY_NAME packet
      *  - chat messages are intercepted in ChatListener using getDisplayName()
      */
     private void applyNick(ServerPlayer player, String displayName) {
         Component nameComponent = Component.literal(displayName);
-        // Custom name / nametag above head
+        // Nametag above head
         player.setCustomName(nameComponent);
         player.setCustomNameVisible(true);
-        // Tab list display name — update via PlayerList which handles the packet broadcast
+
+        // Tab list — set private field via reflection
+        if (tabListDisplayNameField != null) {
+            try {
+                tabListDisplayNameField.set(player, nameComponent);
+            } catch (IllegalAccessException e) {
+                UnstableSMPMod.LOGGER.warn("Could not set tabListDisplayName: " + e.getMessage());
+            }
+        }
+
+        // Broadcast the display name change to all online players
         MinecraftServer server = player.createCommandSourceStack().getServer();
         if (server != null) {
-            // refreshTabListName triggers tab list update for this player on all clients
-            server.getPlayerList().broadcastAll(
-                    ClientboundPlayerInfoUpdatePacket.createPlayerInitializing(List.of(player))
-            );
+            // Use UPDATE_DISPLAY_NAME action — lighter than full re-init
+            ClientboundPlayerInfoUpdatePacket packet =
+                    ClientboundPlayerInfoUpdatePacket.createPlayerInitializing(List.of(player));
+            for (ServerPlayer online : server.getPlayerList().getPlayers()) {
+                online.connection.send(packet);
+            }
         }
     }
 
