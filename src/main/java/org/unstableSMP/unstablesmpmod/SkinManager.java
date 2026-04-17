@@ -12,7 +12,6 @@ import net.minecraft.network.protocol.game.ClientboundPlayerInfoUpdatePacket;
 import net.minecraft.network.protocol.game.ClientboundRespawnPacket;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.entity.player.Player;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -156,17 +155,17 @@ public class SkinManager {
     // ── Skin application ───────────────────────────────────────────────────────
 
     /**
-     * Injects the textures property into the player's GameProfile and sends
-     * ClientboundPlayerInfoRemove + ClientboundPlayerInfoUpdate + ClientboundRespawn
-     * to all online players so the skin updates without a disconnect.
+     * Injects the textures property into the player's GameProfile via reflection
+     * (because getProperties() returns an ImmutableListMultimap in new Authlib),
+     * then sends remove+update+respawn packets to all online players.
      */
     private void applySkinToPlayer(MinecraftServer server, ServerPlayer player, SkinData data) {
         try {
-            GameProfile profile = player.getGameProfile();
+            // getGameProfile() may return an immutable copy in new MC versions.
+            // We reach into the actual stored field to get the mutable original.
+            GameProfile profile = getRealGameProfile(player);
 
-            // Replace the textures property in the profile
-            profile.properties().removeAll("textures");
-            profile.properties().put("textures", new Property("textures", data.value, data.signature));
+            injectTextureProperty(profile, data);
 
             // Broadcast player info remove + update so all clients reload the skin
             List<ServerPlayer> allPlayers = server.getPlayerList().getPlayers();
@@ -197,6 +196,112 @@ public class SkinManager {
         } catch (Exception e) {
             UnstableSMPMod.LOGGER.error("Failed to apply skin to player " + player.getName().getString(), e);
         }
+    }
+
+    /**
+     * Replaces the "textures" property in the player's actual stored GameProfile.
+     *
+     * Problem: ServerPlayer.getGameProfile() in new MC/Authlib versions may return
+     * a copy whose PropertyMap wraps an ImmutableListMultimap → removeAll() throws.
+     *
+     * Solution: find the raw 'gameProfile' field stored on the Entity class hierarchy
+     * via reflection and mutate it directly by replacing the whole GameProfile object
+     * (since the PropertyMap inside the new GameProfile() constructor is mutable).
+     */
+    private static void injectTextureProperty(GameProfile originalProfile, SkinData data) throws Exception {
+        // In MC 1.21.11, GameProfile is a record — properties() is the accessor.
+        // In older versions it was getProperties(). We use reflection to call whichever exists.
+        com.mojang.authlib.properties.PropertyMap props = getPropertyMap(originalProfile);
+        if (props != null) {
+            try {
+                props.removeAll("textures");
+                props.put("textures", new Property("textures", data.value, data.signature));
+                return; // mutable map, done
+            } catch (UnsupportedOperationException ignored) {
+                // immutable — fall through
+            }
+        }
+        replacePropertiesField(originalProfile, data);
+    }
+
+    /** Gets the PropertyMap from a GameProfile, handling both record (properties()) and old (getProperties()) API. */
+    private static com.mojang.authlib.properties.PropertyMap getPropertyMap(GameProfile profile) {
+        // Try new record accessor first: properties()
+        try {
+            var m = profile.getClass().getMethod("properties");
+            Object result = m.invoke(profile);
+            if (result instanceof com.mojang.authlib.properties.PropertyMap pm) return pm;
+        } catch (Exception ignored) {}
+        // Try legacy method: getProperties()
+        try {
+            var m = profile.getClass().getMethod("getProperties");
+            Object result = m.invoke(profile);
+            if (result instanceof com.mojang.authlib.properties.PropertyMap pm) return pm;
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    /**
+     * Reaches into GameProfile's private final `properties` field and replaces it
+     * with a fresh mutable PropertyMap containing the new texture.
+     */
+    private static void replacePropertiesField(GameProfile profile, SkinData data) throws Exception {
+        Field propertiesField = findField(profile.getClass(), "properties");
+        propertiesField.setAccessible(true);
+
+        // Build a fresh mutable LinkedListMultimap with all existing props except old textures
+        com.google.common.collect.LinkedListMultimap<String, Property> backing =
+                com.google.common.collect.LinkedListMultimap.create();
+        Object existing = propertiesField.get(profile);
+        if (existing instanceof com.google.common.collect.Multimap<?, ?> oldMap) {
+            for (Map.Entry<?, ?> entry : oldMap.entries()) {
+                if (!entry.getKey().equals("textures")) {
+                    @SuppressWarnings("unchecked")
+                    var typed = (Map.Entry<String, Property>) entry;
+                    backing.put(typed.getKey(), typed.getValue());
+                }
+            }
+        }
+        backing.put("textures", new Property("textures", data.value, data.signature));
+
+        // PropertyMap constructor in new Authlib requires a Multimap<String,Property>
+        com.mojang.authlib.properties.PropertyMap newMap =
+                new com.mojang.authlib.properties.PropertyMap(backing);
+
+        // Bypass the final modifier to replace the field
+        propertiesField.set(profile, newMap);
+    }
+
+    /** Walk up class hierarchy to find a declared field by name. */
+    private static Field findField(Class<?> clazz, String name) throws NoSuchFieldException {
+        Class<?> c = clazz;
+        while (c != null && c != Object.class) {
+            try {
+                return c.getDeclaredField(name);
+            } catch (NoSuchFieldException e) {
+                c = c.getSuperclass();
+            }
+        }
+        throw new NoSuchFieldException("Field '" + name + "' not found in hierarchy of " + clazz.getName());
+    }
+
+    /**
+     * Returns the real GameProfile stored on the player entity, not the copy
+     * returned by getGameProfile() which may have an immutable PropertyMap.
+     * Tries known field names used across different MC/Authlib versions.
+     */
+    private static GameProfile getRealGameProfile(ServerPlayer player) {
+        String[] candidateFields = {"gameProfile", "fakeProfile", "profile"};
+        for (String name : candidateFields) {
+            try {
+                Field f = findField(player.getClass(), name);
+                f.setAccessible(true);
+                Object val = f.get(player);
+                if (val instanceof GameProfile gp) return gp;
+            } catch (Exception ignored) {}
+        }
+        // Fallback — use the API method even if it returns an immutable copy
+        return player.getGameProfile();
     }
 
     // ── Skin fetching ──────────────────────────────────────────────────────────

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "stationsmpmod",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "name": "UnstableSMP",
   "description": "Hardcore SMP features: death ban, proximity messages, immortality, wither sound.",
   "authors": [
