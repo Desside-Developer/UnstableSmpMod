@@ -20,18 +20,20 @@ public class ImmortalListener {
             return false;
         });
 
-        // Clamp damage so health never drops below MIN_HEALTH
+        // Clamp damage so health never drops below MIN_HEALTH.
+        // CRITICAL: do NOT call player.hurt() inside this callback — it re-triggers
+        // ALLOW_DAMAGE and causes infinite recursion → StackOverflowError crash.
+        // Instead: if the hit would kill/floor the player, set health to MIN_HEALTH
+        // and cancel the damage entirely (return false).
         ServerLivingEntityEvents.ALLOW_DAMAGE.register((entity, source, amount) -> {
             if (!(entity instanceof ServerPlayer player)) return true;
             if (!immortalManager.hasImmortal(player)) return true;
             if (isHoldingTotem(player)) return true;
 
             float currentHealth = player.getHealth();
-            if (currentHealth - amount < MIN_HEALTH) {
-                float safeDamage = currentHealth - MIN_HEALTH;
-                if (safeDamage > 0) {
-                    player.hurt(source, safeDamage);
-                }
+            if (currentHealth - amount <= MIN_HEALTH) {
+                // Would go to or below floor — pin to floor and cancel the hit
+                player.setHealth(MIN_HEALTH);
                 return false;
             }
             return true;
