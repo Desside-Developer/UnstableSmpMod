@@ -1,37 +1,58 @@
-# Gradle
+# ─── Gradle 
 .gradle/
+**/.gradle/
 build/
 out/
 
-# IntelliJ IDEA
-.idea/
-*.iml
-*.iws
-*.ipr
+# ─── Java 
+*.class
+*.log
+hs_err_*.log
+replay_*.log
+*.hprof
+*.jfr
 
-# Eclipse
-.classpath
-.project
-.settings/
-
-# VS Code
-.vscode/
-
-# Fabric / Minecraft
+# ─── Fabric / Minecraft 
 run/
 .fabric/
 remappedJars/
 
-# Generated sources (можно перегенерить через genSources)
+# Generated sources
 src/main/generated/
 
-# OS
+# ─── IDE 
+
+## IntelliJ
+.idea/
+*.iml
+*.ipr
+*.iws
+
+## Eclipse
+.classpath
+.project
+.settings/
+
+## VS Code
+.vscode/
+
+# ─── OS 
 .DS_Store
 Thumbs.db
 
-# Logs
-*.log
+# ─── Logs 
 logs/
 
-# Cache
+# ─── Cache 
 *.cache
+
+# ─── Local config / secrets 
+local.properties
+.env
+
+# ─── Build artifacts 
+*.jar
+!gradle-wrapper.jar
+
+# ─── Architectury / Loom internals 
+.architectury-transformer/
